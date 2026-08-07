@@ -1,0 +1,24 @@
+# Node modules
+node_modules/
+
+# Production build target
+dist/
+
+# Environments local keys
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs/
+*.log
+
+# Prisma local database sqlite file (if generated)
+*.db
+*.db-journal
+
+# Package lock files or system files
+.DS_Store
+Thumbs.db
