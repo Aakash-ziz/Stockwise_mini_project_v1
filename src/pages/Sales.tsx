@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Link } from 'react-router-dom';
 import { 
   User, 
   Tag, 
@@ -8,8 +7,12 @@ import {
   ChevronLeft, 
   ChevronRight, 
   Plus, 
-  Scan
+  Scan,
+  ShoppingCart,
+  Trash2,
+  Eye
 } from 'lucide-react';
+
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Table, TableHead, TableBody, TableRow, TableCell } from '../components/Table';
@@ -18,28 +21,26 @@ import { Modal } from '../components/Modal';
 import { Input } from '../components/Input';
 import { SearchBar } from '../components/SearchBar';
 import { useInventory } from '../context/InventoryContext';
-import type { Product, Transaction } from '../types/inventory';
+import type { Product, Transaction, SaleCartItem } from '../types/inventory';
 import { ProductThumbnail } from '../components/ProductThumbnail';
 import { useClickOutside } from '../hooks/useClickOutside';
 import { useTable } from '../hooks/useTable';
 import { formatCurrency, formatCurrencyPrice } from '../utils/format';
 import { PageSkeleton, ErrorState, EmptyState } from '../components/feedback';
-import { VALIDATION_MESSAGES, TOAST_MESSAGES } from '../utils';
+
 
 export const Sales: React.FC = () => {
   const { 
     products, 
     transactions, 
-    addTransaction,
+    processCheckout,
     soldTodayRevenue,
     loading,
     error
   } = useInventory();
 
-  // Terminal inputs state
-  const [productSearch, setProductSearch] = useState('');
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [quantity, setQuantity] = useState(1);
+  // Multi-item Cart state
+  const [cart, setCart] = useState<SaleCartItem[]>([]);
   const [customer, setCustomer] = useState('');
   
   // Toggles and inputs
@@ -48,21 +49,21 @@ export const Sales: React.FC = () => {
   const [showNote, setShowNote] = useState(false);
   const [note, setNote] = useState('');
   
-  // Dropdown autocomplete search matches
+  // Product Search & Quick Add
+  const [productSearch, setProductSearch] = useState('');
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [itemQuantity, setItemQuantity] = useState(1);
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const [dropdownFocusedIndex, setDropdownFocusedIndex] = useState(-1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Clear form confirmation modal
+  // Modals state
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [selectedTransactionForModal, setSelectedTransactionForModal] = useState<Transaction | null>(null);
 
-  // Is form dirty?
-  const isFormDirty = useMemo(() => {
-    return selectedProduct !== null || quantity > 1 || customer !== '' || discount > 0 || note !== '' || productSearch !== '';
-  }, [selectedProduct, quantity, customer, discount, note, productSearch]);
-
-  // Handle autocomplete matching in products list
+  // Autocomplete matching in products list
   const productMatches = useMemo(() => {
     if (!productSearch) return [];
     return products.filter(p => 
@@ -71,10 +72,8 @@ export const Sales: React.FC = () => {
     );
   }, [productSearch, products]);
 
-  // Handle outside clicks to close product dropdown using useClickOutside hook
   useClickOutside(dropdownRef, () => setIsProductDropdownOpen(false));
 
-  // Keyboard navigation for autocomplete list
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!isProductDropdownOpen || productMatches.length === 0) return;
 
@@ -101,76 +100,132 @@ export const Sales: React.FC = () => {
     setProductSearch('');
     setIsProductDropdownOpen(false);
     setDropdownFocusedIndex(-1);
-    setQuantity(1); // default back to 1
+    setItemQuantity(1);
   };
 
-  // Compute total price based on selected product and discount percentage
-  const computedTotal = useMemo(() => {
-    if (!selectedProduct) return 0;
-    const rawTotal = selectedProduct.sellingPrice * quantity;
-    const discountAmt = rawTotal * (discount / 100);
-    return Math.max(0, rawTotal - discountAmt);
-  }, [selectedProduct, quantity, discount]);
+  // Add selected item to multi-item cart
+  const handleAddToCart = () => {
+    if (!selectedProduct || itemQuantity <= 0) return;
 
-  // Compute inline form validation errors
-  const quantityError = useMemo(() => {
-    if (!selectedProduct) return '';
-    if (quantity <= 0 || quantity % 1 !== 0) return VALIDATION_MESSAGES.invalidQuantity;
-    if (quantity > selectedProduct.quantity) {
-      return TOAST_MESSAGES.sale.insufficientStock(selectedProduct.quantity);
+    // Check if item already in cart
+    const existingIndex = cart.findIndex(c => c.productId === selectedProduct.id);
+    const existingQty = existingIndex !== -1 ? cart[existingIndex].quantity : 0;
+    const combinedQty = existingQty + itemQuantity;
+
+    if (combinedQty > selectedProduct.quantity) {
+      alert(`Cannot add ${itemQuantity} units. Maximum available stock for ${selectedProduct.name} is ${selectedProduct.quantity}.`);
+      return;
     }
-    return '';
-  }, [selectedProduct, quantity]);
 
-  const discountError = useMemo(() => {
-    if (discount < 0 || discount > 100 || discount % 1 !== 0) return VALIDATION_MESSAGES.discountRange;
-    return '';
-  }, [discount]);
-
-  // Add transaction submit
-  const handleCompleteSale = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedProduct || quantityError || discountError) return;
-
-    const result = addTransaction({
-      productName: selectedProduct.name,
-      sku: selectedProduct.sku,
-      customer: customer || 'Guest Customer',
-      quantity,
-      totalPrice: computedTotal
-    });
-
-    if (result.success) {
-      resetForm();
-    }
-  };
-
-  const handleClearClick = () => {
-    if (isFormDirty) {
-      setShowClearConfirm(true);
+    if (existingIndex !== -1) {
+      const updated = [...cart];
+      updated[existingIndex].quantity = combinedQty;
+      updated[existingIndex].total = combinedQty * selectedProduct.sellingPrice;
+      setCart(updated);
     } else {
-      resetForm();
+      setCart(prev => [
+        ...prev,
+        {
+          productId: selectedProduct.id,
+          name: selectedProduct.name,
+          sku: selectedProduct.sku,
+          quantity: itemQuantity,
+          unitPrice: selectedProduct.sellingPrice,
+          total: itemQuantity * selectedProduct.sellingPrice,
+        }
+      ]);
     }
+
+    setSelectedProduct(null);
+    setItemQuantity(1);
+    if (searchInputRef.current) searchInputRef.current.focus();
   };
 
-  const confirmClearForm = () => {
-    resetForm();
-    setShowClearConfirm(false);
+  // Adjust cart item quantity
+  const updateCartItemQuantity = (productId: string, newQty: number) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+
+    if (newQty <= 0) {
+      removeCartItem(productId);
+      return;
+    }
+
+    if (newQty > product.quantity) {
+      alert(`Only ${product.quantity} units available in inventory.`);
+      return;
+    }
+
+    setCart(prev => prev.map(item => {
+      if (item.productId === productId) {
+        return {
+          ...item,
+          quantity: newQty,
+          total: newQty * item.unitPrice,
+        };
+      }
+      return item;
+    }));
+  };
+
+  const removeCartItem = (productId: string) => {
+    setCart(prev => prev.filter(c => c.productId !== productId));
+  };
+
+  // Financial calculations
+  const cartSubtotal = useMemo(() => {
+    return cart.reduce((sum, item) => sum + item.total, 0);
+  }, [cart]);
+
+  const discountAmount = useMemo(() => {
+    return cartSubtotal * (Math.max(0, Math.min(100, discount)) / 100);
+  }, [cartSubtotal, discount]);
+
+  const grandTotal = useMemo(() => {
+    return Math.max(0, cartSubtotal - discountAmount);
+  }, [cartSubtotal, discountAmount]);
+
+  const totalCartUnits = useMemo(() => {
+    return cart.reduce((sum, item) => sum + item.quantity, 0);
+  }, [cart]);
+
+  const isFormDirty = cart.length > 0 || customer !== '' || discount > 0 || note !== '';
+
+  const handleCheckoutSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (cart.length === 0 || isSubmitting) return;
+
+    try {
+      setIsSubmitting(true);
+      const result = await processCheckout({
+        customer: customer.trim() || 'Walk-in Customer',
+        items: cart,
+        discount,
+        note,
+      });
+
+      if (result.success && result.transaction) {
+        setSelectedTransactionForModal(result.transaction);
+        resetForm();
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const resetForm = () => {
-    setProductSearch('');
+    setCart([]);
     setSelectedProduct(null);
-    setQuantity(1);
+    setProductSearch('');
+    setItemQuantity(1);
     setCustomer('');
     setDiscount(0);
     setShowDiscount(false);
     setNote('');
     setShowNote(false);
-    setDropdownFocusedIndex(-1);
   };
 
-  // Compute transactions using useTable hook
+  // Transactions table using useTable hook
   const {
     searchQuery: txSearchQuery,
     setSearchQuery: setTxSearchQuery,
@@ -188,7 +243,6 @@ export const Sales: React.FC = () => {
     initialPageSize: 5
   });
 
-
   if (loading) {
     return <PageSkeleton variant="table" />;
   }
@@ -202,274 +256,345 @@ export const Sales: React.FC = () => {
       {/* Page Title & Stats */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="headline-lg text-brand-primary">Sales Terminal</h1>
-          <p className="body-md text-brand-secondary mt-1">Process new transactions and review daily performance.</p>
+          <h1 className="headline-lg text-brand-primary">Sales Terminal (POS)</h1>
+          <p className="body-md text-brand-secondary mt-1">Multi-item point-of-sale checkout terminal with real-time stock deduction.</p>
         </div>
         
         {/* Today's Revenue Card */}
         <Card level={1} className="px-5 py-3 flex flex-col justify-center min-w-44 select-none w-full sm:w-auto">
           <span className="caption text-brand-secondary font-bold uppercase tracking-wider">Today's Revenue</span>
           <span className="text-xl font-bold tracking-tight text-brand-primary mt-1">
-            {formatCurrency(soldTodayRevenue + 8500, 2)}
+            {formatCurrency(soldTodayRevenue, 2)}
           </span>
         </Card>
       </div>
 
       {/* Main Terminal Interface Split */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-        {/* Transaction Input Panel */}
+        {/* Left Column: Product Selection & Active Cart */}
         <Card level={1} className="p-6 lg:col-span-2 relative">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="headline-sm text-brand-primary font-bold">Initialize New Transaction</h2>
-            <span className="caption font-mono bg-neutral-100 dark:bg-brand-border px-2 py-0.5 rounded text-brand-secondary font-semibold">Terminal A1</span>
+            <h2 className="headline-sm text-brand-primary font-bold">POS Terminal</h2>
+            <div className="flex items-center gap-2">
+              <span className="caption font-mono bg-neutral-100 dark:bg-brand-border px-2.5 py-1 rounded text-brand-secondary font-semibold">
+                Terminal #01
+              </span>
+              <span className="caption bg-status-stock-bg text-status-stock-text px-2 py-0.5 rounded font-bold">
+                Online
+              </span>
+            </div>
           </div>
 
-          <form onSubmit={handleCompleteSale} className="flex flex-col gap-5">
-            {/* Product selection search bar */}
-            <div className="relative" ref={dropdownRef}>
-              <label className="caption font-bold text-brand-primary uppercase block mb-1.5 select-none">
-                Product SKU / Name
-              </label>
-              
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Scan className="h-4 w-4 text-brand-tertiary" />
+          {/* Product Search & Add Row */}
+          <div className="flex flex-col gap-4 border-b border-brand-border pb-6">
+            <label className="caption font-bold text-brand-primary uppercase block select-none">
+              Search & Add Product to Cart
+            </label>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+              <div className="sm:col-span-8 relative" ref={dropdownRef}>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Scan className="h-4 w-4 text-brand-tertiary" />
+                  </div>
+                  
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    placeholder="Scan barcode or type SKU / product name..."
+                    value={productSearch}
+                    onKeyDown={handleSearchKeyDown}
+                    onChange={(e) => {
+                      setProductSearch(e.target.value);
+                      setIsProductDropdownOpen(true);
+                      setDropdownFocusedIndex(-1);
+                    }}
+                    onFocus={() => setIsProductDropdownOpen(true)}
+                    className="w-full pl-10 pr-4 py-2.5 border border-brand-border rounded-DEFAULT bg-brand-bg text-brand-primary body-md focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all"
+                  />
                 </div>
-                
+
+                {/* Autocomplete Dropdown overlay */}
+                {isProductDropdownOpen && productMatches.length > 0 && (
+                  <div 
+                    role="listbox" 
+                    className="absolute left-0 mt-1 w-full bg-brand-bg border border-brand-border rounded-DEFAULT shadow-subtle-precision py-1 z-30 max-h-56 overflow-y-auto animate-fade-in"
+                  >
+                    {productMatches.map((p, idx) => {
+                      const isFocused = idx === dropdownFocusedIndex;
+                      const isOutOfStock = p.quantity === 0;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          disabled={isOutOfStock}
+                          onClick={() => selectProduct(p)}
+                          className={`w-full text-left px-4 py-2.5 flex justify-between items-center transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                            isFocused ? 'bg-neutral-50 dark:bg-brand-border/40 font-semibold' : 'hover:bg-neutral-50 dark:hover:bg-brand-border/30'
+                          }`}
+                        >
+                          <div className="flex flex-col">
+                            <span className="body-md font-semibold text-brand-primary">{p.name}</span>
+                            <span className="caption text-brand-tertiary font-mono">{p.sku}</span>
+                          </div>
+                          <div className="text-right flex flex-col items-end">
+                            <span className="body-md font-bold text-brand-primary">{formatCurrencyPrice(p.sellingPrice)}</span>
+                            <span className={`caption font-semibold ${isOutOfStock ? 'text-status-out-text' : 'text-brand-secondary'}`}>
+                              {isOutOfStock ? 'OUT OF STOCK' : `${p.quantity} available`}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="sm:col-span-2">
                 <input
-                  ref={searchInputRef}
-                  type="text"
-                  placeholder={selectedProduct ? selectedProduct.name : "Start typing product name..."}
-                  required={!selectedProduct}
-                  value={productSearch}
-                  onKeyDown={handleSearchKeyDown}
-                  onChange={(e) => {
-                    setProductSearch(e.target.value);
-                    setIsProductDropdownOpen(true);
-                    setDropdownFocusedIndex(-1);
-                  }}
-                  onFocus={() => {
-                    setIsProductDropdownOpen(true);
-                  }}
-                  className="w-full pl-10 pr-4 py-2.5 border border-brand-border rounded-DEFAULT bg-brand-bg text-brand-primary body-md focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all"
+                  type="number"
+                  min="1"
+                  max={selectedProduct ? selectedProduct.quantity : 99}
+                  value={itemQuantity}
+                  onChange={(e) => setItemQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                  disabled={!selectedProduct}
+                  className="w-full px-3 py-2.5 border border-brand-border rounded-DEFAULT bg-brand-bg text-brand-primary body-md text-center focus:outline-none focus:border-brand-primary disabled:opacity-50"
+                  placeholder="Qty"
                 />
               </div>
 
-              {/* Autocomplete Dropdown overlay */}
-              {isProductDropdownOpen && productMatches.length > 0 && (
-                <div 
-                  role="listbox" 
-                  aria-label="Product Search Results"
-                  className="absolute left-0 mt-1 w-full bg-brand-bg border border-brand-border rounded-DEFAULT shadow-subtle-precision py-1 z-20 max-h-48 overflow-y-auto animate-fade-in"
+              <div className="sm:col-span-2">
+                <Button
+                  variant="primary"
+                  type="button"
+                  disabled={!selectedProduct}
+                  onClick={handleAddToCart}
+                  className="w-full py-2.5 rounded-DEFAULT flex items-center justify-center gap-1.5"
                 >
-                  {productMatches.map((p, idx) => {
-                    const isFocused = idx === dropdownFocusedIndex;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        role="option"
-                        aria-selected={isFocused}
-                        onClick={() => selectProduct(p)}
-                        className={`w-full text-left px-4 py-2 flex justify-between items-center transition-colors cursor-pointer ${
-                          isFocused ? 'bg-neutral-50 dark:bg-brand-border/40 font-semibold' : 'hover:bg-neutral-50 dark:hover:bg-brand-border/30'
-                        }`}
-                      >
-                        <div className="flex flex-col">
-                          <span className="body-md font-semibold text-brand-primary">{p.name}</span>
-                          <span className="caption text-brand-tertiary font-mono">{p.sku}</span>
-                        </div>
-                        <div className="text-right flex flex-col items-end">
-                          <span className="body-md font-bold text-brand-primary">{formatCurrencyPrice(p.sellingPrice)}</span>
-                          <span className="caption text-brand-secondary">{p.quantity} in stock</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                  <Plus className="h-4 w-4" />
+                  <span>Add</span>
+                </Button>
+              </div>
             </div>
 
-            {/* Selected Product info Card */}
+            {/* Currently picked product badge */}
             {selectedProduct && (
-              <div className="border border-brand-border p-3.5 rounded-md flex justify-between items-center bg-neutral-50/20 dark:bg-brand-border/10">
-                <div className="flex items-center gap-3">
+              <div className="flex items-center justify-between p-3 rounded bg-neutral-50 dark:bg-brand-border/20 border border-brand-border mt-1">
+                <div className="flex items-center gap-2.5">
                   <ProductThumbnail type={selectedProduct.thumbnailIcon} color={selectedProduct.thumbnailColor} />
                   <div>
-                    <strong className="text-brand-primary body-md font-semibold block">{selectedProduct.name}</strong>
-                    <span className="caption text-brand-secondary font-mono tracking-wider">{selectedProduct.sku}</span>
+                    <span className="text-xs font-bold text-brand-primary block">{selectedProduct.name}</span>
+                    <span className="text-[10px] font-mono text-brand-secondary">{selectedProduct.sku}</span>
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className="caption text-brand-secondary uppercase font-bold block">Available Stock</span>
-                  <strong className="text-brand-primary body-lg font-bold">{selectedProduct.quantity} units</strong>
+                  <span className="text-xs font-bold text-brand-primary block">{formatCurrencyPrice(selectedProduct.sellingPrice)}</span>
+                  <span className="text-[10px] text-status-stock-text font-semibold">{selectedProduct.quantity} units in stock</span>
                 </div>
               </div>
             )}
+          </div>
 
-            {/* Quantity */}
-            <Input
-              label="Quantity"
-              type="number"
-              min="1"
-              required
-              disabled={!selectedProduct}
-              value={quantity}
-              onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
-              error={quantityError}
-            />
-
-            {/* Customer CRM info */}
-            <Input
-              label="Customer Name / Organization"
-              placeholder="Guest or Search CRM..."
-              value={customer}
-              onChange={(e) => setCustomer(e.target.value)}
-              disabled={!selectedProduct}
-              icon={<User className="h-4 w-4 text-brand-tertiary" />}
-            />
-
-            {/* Action Toggles for Discount and Note */}
-            <div className="flex gap-4 items-center pt-2 select-none">
-              <button
-                type="button"
-                onClick={() => setShowDiscount(!showDiscount)}
-                className={`flex items-center gap-1.5 text-xs font-semibold select-none cursor-pointer ${
-                  showDiscount ? 'text-brand-primary' : 'text-brand-secondary hover:text-brand-primary'
-                }`}
-              >
-                <Tag className="h-3.5 w-3.5" />
-                <span>{showDiscount ? 'Remove Discount' : '+ Add Discount'}</span>
-              </button>
-              
-              <button
-                type="button"
-                onClick={() => setShowNote(!showNote)}
-                className={`flex items-center gap-1.5 text-xs font-semibold select-none cursor-pointer ${
-                  showNote ? 'text-brand-primary' : 'text-brand-secondary hover:text-brand-primary'
-                }`}
-              >
-                <FileText className="h-3.5 w-3.5" />
-                <span>{showNote ? 'Remove Note' : '+ Add Note'}</span>
-              </button>
+          {/* Cart Items List */}
+          <div className="mt-6">
+            <div className="flex justify-between items-center mb-3">
+              <span className="caption font-bold text-brand-primary uppercase">
+                Active Checkout Items ({cart.length})
+              </span>
+              {cart.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setCart([])}
+                  className="text-xs text-status-out-text hover:underline cursor-pointer font-semibold"
+                >
+                  Clear Cart
+                </button>
+              )}
             </div>
 
-            {/* Optional Discount Input */}
-            {showDiscount && (
-              <Input
-                label="Discount Percentage (%)"
-                type="number"
-                min="0"
-                max="100"
-                placeholder="0"
-                value={discount || ''}
-                onChange={(e) => setDiscount(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
-                error={discountError}
-              />
-            )}
+            {cart.length === 0 ? (
+              <div className="p-8 border border-dashed border-brand-border rounded-md text-center flex flex-col items-center justify-center text-brand-tertiary">
+                <ShoppingCart className="h-8 w-8 mb-2 stroke-[1.5] text-brand-secondary/40" />
+                <span className="body-md font-semibold text-brand-secondary">Cart is currently empty</span>
+                <span className="caption text-brand-tertiary mt-1">Scan an item or pick from the search box above to begin.</span>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
+                {cart.map((item) => (
+                  <div 
+                    key={item.productId}
+                    className="flex items-center justify-between p-3 border border-brand-border rounded-md bg-brand-bg hover:bg-neutral-50/50 dark:hover:bg-brand-border/10 transition-colors"
+                  >
+                    <div className="flex flex-col min-w-0 pr-3">
+                      <span className="body-md font-semibold text-brand-primary truncate">{item.name}</span>
+                      <span className="caption text-brand-secondary font-mono">{item.sku} &bull; {formatCurrencyPrice(item.unitPrice)} each</span>
+                    </div>
 
-            {/* Optional Note Input */}
-            {showNote && (
-              <Input
-                label="Transaction Note"
-                placeholder="Add context or notes here..."
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-            )}
+                    <div className="flex items-center gap-4 shrink-0">
+                      <div className="flex items-center border border-brand-border rounded">
+                        <button
+                          type="button"
+                          onClick={() => updateCartItemQuantity(item.productId, item.quantity - 1)}
+                          className="px-2 py-0.5 text-brand-secondary hover:bg-neutral-100 dark:hover:bg-brand-border/30 cursor-pointer font-bold"
+                        >
+                          -
+                        </button>
+                        <span className="px-3 py-0.5 body-md font-bold text-brand-primary min-w-[2rem] text-center">
+                          {item.quantity}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => updateCartItemQuantity(item.productId, item.quantity + 1)}
+                          className="px-2 py-0.5 text-brand-secondary hover:bg-neutral-100 dark:hover:bg-brand-border/30 cursor-pointer font-bold"
+                        >
+                          +
+                        </button>
+                      </div>
 
-            {/* Purchase Details Indicator */}
-            {selectedProduct && !quantityError && !discountError && (
-              <div className="border-t border-dashed border-brand-border pt-4 flex flex-col gap-1.5 bg-neutral-50/50 dark:bg-brand-border/20 p-4 rounded-md animate-fade-in">
+                      <span className="body-md font-bold text-brand-primary min-w-[4.5rem] text-right">
+                        {formatCurrencyPrice(item.total)}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => removeCartItem(item.productId)}
+                        className="p-1 text-brand-secondary hover:text-status-out-text cursor-pointer transition-colors"
+                        title="Remove item"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Card>
+
+        {/* Right Column: Checkout Summary & Customer Details */}
+        <Card level={1} className="p-6 flex flex-col justify-between h-full">
+          <div>
+            <h2 className="headline-sm text-brand-primary font-bold border-b border-brand-border pb-4 mb-5">
+              Checkout & Payment
+            </h2>
+
+            <form onSubmit={handleCheckoutSubmit} className="flex flex-col gap-4">
+              <Input
+                label="Customer Name / Organization"
+                placeholder="Walk-in Customer"
+                value={customer}
+                onChange={(e) => setCustomer(e.target.value)}
+                icon={<User className="h-4 w-4 text-brand-tertiary" />}
+              />
+
+              {/* Action Toggles for Discount and Note */}
+              <div className="flex gap-4 items-center pt-1 select-none">
+                <button
+                  type="button"
+                  onClick={() => setShowDiscount(!showDiscount)}
+                  className={`flex items-center gap-1.5 text-xs font-semibold select-none cursor-pointer ${
+                    showDiscount ? 'text-brand-primary' : 'text-brand-secondary hover:text-brand-primary'
+                  }`}
+                >
+                  <Tag className="h-3.5 w-3.5" />
+                  <span>{showDiscount ? 'Remove Discount' : '+ Add Discount'}</span>
+                </button>
+                
+                <button
+                  type="button"
+                  onClick={() => setShowNote(!showNote)}
+                  className={`flex items-center gap-1.5 text-xs font-semibold select-none cursor-pointer ${
+                    showNote ? 'text-brand-primary' : 'text-brand-secondary hover:text-brand-primary'
+                  }`}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>{showNote ? 'Remove Note' : '+ Add Note'}</span>
+                </button>
+              </div>
+
+              {/* Discount Input */}
+              {showDiscount && (
+                <Input
+                  label="Discount Percentage (%)"
+                  type="number"
+                  min="0"
+                  max="100"
+                  placeholder="0"
+                  value={discount || ''}
+                  onChange={(e) => setDiscount(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
+                />
+              )}
+
+              {/* Note Input */}
+              {showNote && (
+                <Input
+                  label="Transaction Memo"
+                  placeholder="Internal notes or invoice remark..."
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              )}
+
+              {/* Cart Calculations Summary */}
+              <div className="border-t border-brand-border pt-4 mt-2 flex flex-col gap-2 bg-neutral-50/50 dark:bg-brand-border/20 p-4 rounded-md">
                 <div className="flex justify-between text-xs text-brand-secondary font-medium">
-                  <span>Subtotal ({quantity} x {formatCurrencyPrice(selectedProduct.sellingPrice)})</span>
-                  <span>{formatCurrencyPrice(selectedProduct.sellingPrice * quantity)}</span>
+                  <span>Total Items</span>
+                  <span className="font-semibold text-brand-primary">{totalCartUnits} units ({cart.length} line items)</span>
+                </div>
+                <div className="flex justify-between text-xs text-brand-secondary font-medium">
+                  <span>Subtotal</span>
+                  <span className="font-semibold text-brand-primary">{formatCurrencyPrice(cartSubtotal)}</span>
                 </div>
                 {discount > 0 && (
                   <div className="flex justify-between text-xs text-status-out-text font-medium">
                     <span>Discount ({discount}%)</span>
-                    <span>-{formatCurrencyPrice((selectedProduct.sellingPrice * quantity) * (discount / 100))}</span>
+                    <span>-{formatCurrencyPrice(discountAmount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-sm text-brand-primary font-bold border-t border-brand-border pt-2 mt-1">
+                <div className="flex justify-between text-base text-brand-primary font-bold border-t border-brand-border pt-2 mt-1">
                   <span>Grand Total</span>
-                  <span>{formatCurrencyPrice(computedTotal)}</span>
+                  <span className="text-lg">{formatCurrencyPrice(grandTotal)}</span>
                 </div>
               </div>
-            )}
 
-            {/* Submission button panel */}
-            <div className="border-t border-brand-border pt-4 mt-2 flex gap-3">
-              {isFormDirty && (
+              {/* Complete Checkout Button */}
+              <div className="pt-2 flex flex-col gap-2">
                 <Button
-                  variant="secondary"
-                  type="button"
-                  onClick={handleClearClick}
-                  className="flex-1 py-3 rounded-DEFAULT"
+                  variant="primary"
+                  type="submit"
+                  disabled={cart.length === 0 || isSubmitting}
+                  className="w-full flex items-center justify-center gap-2 py-3.5 rounded-DEFAULT text-sm font-bold disabled:opacity-50"
                 >
-                  Clear Form
+                  <span>{isSubmitting ? 'Processing Transaction...' : 'Complete Sale & Print Invoice'}</span>
+                  <ArrowRight className="h-4 w-4" />
                 </Button>
-              )}
-              <Button
-                variant="primary"
-                type="submit"
-                disabled={!selectedProduct || !!quantityError || !!discountError}
-                className={`${isFormDirty ? 'flex-[2]' : 'w-full'} flex items-center justify-center gap-2 py-3 rounded-DEFAULT`}
-              >
-                <span>Complete Sale</span>
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </form>
-        </Card>
 
-        {/* Stock Insights Panel */}
-        <Card level={1} className="p-6 flex flex-col justify-between h-full min-h-[460px]">
-          <div>
-            <h2 className="headline-sm text-brand-primary font-bold border-b border-brand-border pb-4 mb-5">Stock Insights</h2>
-            
-            <div className="flex flex-col gap-6">
-              {/* Low Stock Alerts */}
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-semibold text-brand-secondary">Low Stock Alerts</span>
-                <span className="text-sm font-bold text-status-out-text bg-status-out-bg px-2.5 py-0.5 rounded-full">
-                  {products.filter(p => p.quantity <= p.minStock).length}
-                </span>
+                {isFormDirty && (
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    onClick={() => setShowClearConfirm(true)}
+                    className="w-full py-2.5 rounded-DEFAULT text-xs"
+                  >
+                    Discard Transaction
+                  </Button>
+                )}
               </div>
-
-              {/* Pending Shipments */}
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-semibold text-brand-secondary">Pending Shipments</span>
-                <span className="text-sm font-bold text-status-low-text bg-status-low-bg px-2.5 py-0.5 rounded-full">4</span>
-              </div>
-
-              {/* Best Seller */}
-              <div className="flex justify-between items-center border-t border-brand-border pt-5 mt-2">
-                <span className="text-sm font-semibold text-brand-secondary">Best Seller</span>
-                <span className="caption font-mono uppercase bg-neutral-100 dark:bg-brand-border text-brand-primary px-3 py-1 rounded font-bold tracking-wider">
-                  MacBook Pro M2
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-8 pt-6 border-t border-brand-border">
-            <Link to="/reports" className="block w-full">
-              <Button variant="secondary" className="w-full py-2.5">
-                View Analytics
-              </Button>
-            </Link>
+            </form>
           </div>
         </Card>
       </div>
 
-      {/* Recent Sales Section */}
-      <Card level={1} className="overflow-hidden mt-2">
+      {/* Transaction History Section */}
+      <Card level={1} className="overflow-hidden mt-4">
         <div className="flex flex-col md:flex-row justify-between md:items-center px-6 py-5 border-b border-brand-border gap-4">
-          <h2 className="headline-sm text-brand-primary font-bold">Recent Sales</h2>
+          <div>
+            <h2 className="headline-sm text-brand-primary font-bold">Transaction History</h2>
+            <p className="caption text-brand-secondary mt-0.5">Audit log of all completed and pending point-of-sale invoices.</p>
+          </div>
           
           <SearchBar
-            placeholder="Search transaction ID, SKU, product, customer..."
+            placeholder="Search invoice TXN, product, SKU, customer..."
             value={txSearchQuery}
             onChange={(e) => setTxSearchQuery(e.target.value)}
             className="max-w-xs text-xs"
@@ -486,21 +611,22 @@ export const Sales: React.FC = () => {
               <TableHead>
                 <TableRow isHeader>
                   <TableCell isHeader className="w-[15%] cursor-pointer select-none hover:text-brand-primary" onClick={() => handleSort('id')}>
-                    Transaction ID {renderSortIndicator('id')}
+                    Invoice Code {renderSortIndicator('id')}
                   </TableCell>
                   <TableCell isHeader className="w-[30%] cursor-pointer select-none hover:text-brand-primary" onClick={() => handleSort('productName')}>
-                    Product {renderSortIndicator('productName')}
+                    Item Summary {renderSortIndicator('productName')}
                   </TableCell>
-                  <TableCell isHeader className="w-[20%] cursor-pointer select-none hover:text-brand-primary" onClick={() => handleSort('customer')}>
+                  <TableCell isHeader className="w-[18%] cursor-pointer select-none hover:text-brand-primary" onClick={() => handleSort('customer')}>
                     Customer {renderSortIndicator('customer')}
                   </TableCell>
                   <TableCell isHeader className="w-[10%] cursor-pointer select-none hover:text-brand-primary" onClick={() => handleSort('quantity')}>
-                    Quantity {renderSortIndicator('quantity')}
+                    Qty Sold {renderSortIndicator('quantity')}
                   </TableCell>
-                  <TableCell isHeader className="w-[15%] cursor-pointer select-none hover:text-brand-primary" onClick={() => handleSort('totalPrice')}>
-                    Total Price {renderSortIndicator('totalPrice')}
+                  <TableCell isHeader className="w-[12%] cursor-pointer select-none hover:text-brand-primary" onClick={() => handleSort('totalPrice')}>
+                    Total Amount {renderSortIndicator('totalPrice')}
                   </TableCell>
                   <TableCell isHeader className="w-[10%]">Status</TableCell>
+                  <TableCell isHeader className="w-[5%] text-right"></TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -518,6 +644,15 @@ export const Sales: React.FC = () => {
                     <TableCell className="font-bold">{formatCurrencyPrice(txn.totalPrice)}</TableCell>
                     <TableCell>
                       <StatusBadge status={txn.status} />
+                    </TableCell>
+                    <TableCell className="text-right pr-4">
+                      <button
+                        onClick={() => setSelectedTransactionForModal(txn)}
+                        className="p-1 text-brand-secondary hover:text-brand-primary rounded hover:bg-neutral-100 dark:hover:bg-brand-border/30 cursor-pointer transition-colors"
+                        title="View Invoice Details"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -572,29 +707,87 @@ export const Sales: React.FC = () => {
         )}
       </Card>
 
-      {/* Floating circular black "+" action button on bottom right */}
-      <button 
-        onClick={() => {
-          if (searchInputRef.current) searchInputRef.current.focus();
-        }}
-        className="fixed bottom-6 right-6 h-12 w-12 bg-brand-primary text-brand-bg rounded-full shadow-subtle-precision flex items-center justify-center hover:bg-neutral-800 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200 transition-all select-none hover:scale-105 active:scale-95 cursor-pointer z-30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary"
-        title="Quick Initialize"
+      {/* INVOICE DETAIL MODAL */}
+      <Modal 
+        isOpen={!!selectedTransactionForModal} 
+        onClose={() => setSelectedTransactionForModal(null)} 
+        title={`Sales Receipt: ${selectedTransactionForModal?.id}`}
       >
-        <Plus className="h-6 w-6" />
-      </button>
+        {selectedTransactionForModal && (
+          <div className="flex flex-col gap-4 py-2">
+            <div className="flex justify-between items-center pb-3 border-b border-brand-border">
+              <div>
+                <span className="caption text-brand-secondary font-bold block uppercase">Billed Customer</span>
+                <strong className="body-lg text-brand-primary">{selectedTransactionForModal.customer}</strong>
+              </div>
+              <div className="text-right">
+                <span className="caption text-brand-secondary font-bold block uppercase">Invoice Date</span>
+                <span className="body-md font-mono text-brand-primary">{selectedTransactionForModal.date}</span>
+              </div>
+            </div>
+
+            {/* Line items breakdown */}
+            <div className="flex flex-col gap-2">
+              <span className="caption font-bold text-brand-primary uppercase">Purchased Items</span>
+              <div className="border border-brand-border rounded-md divide-y divide-brand-border">
+                {selectedTransactionForModal.items && selectedTransactionForModal.items.length > 0 ? (
+                  selectedTransactionForModal.items.map((item, idx) => (
+                    <div key={idx} className="p-3 flex justify-between items-center text-xs">
+                      <div>
+                        <strong className="text-brand-primary block">{item.productName}</strong>
+                        <span className="text-brand-secondary font-mono">{item.sku} &bull; {item.quantity} x {formatCurrencyPrice(item.unitPrice)}</span>
+                      </div>
+                      <span className="font-bold text-brand-primary">{formatCurrencyPrice(item.quantity * item.unitPrice)}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-3 flex justify-between items-center text-xs">
+                    <div>
+                      <strong className="text-brand-primary block">{selectedTransactionForModal.productName}</strong>
+                      <span className="text-brand-secondary font-mono">{selectedTransactionForModal.sku} &bull; {selectedTransactionForModal.quantity} units</span>
+                    </div>
+                    <span className="font-bold text-brand-primary">{formatCurrencyPrice(selectedTransactionForModal.totalPrice)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {selectedTransactionForModal.discount !== undefined && selectedTransactionForModal.discount > 0 && (
+              <div className="flex justify-between text-xs text-status-out-text font-semibold px-1">
+                <span>Applied Discount</span>
+                <span>{selectedTransactionForModal.discount}% OFF</span>
+              </div>
+            )}
+
+            <div className="flex justify-between items-center pt-3 border-t border-brand-border text-base font-bold text-brand-primary px-1">
+              <span>Grand Total</span>
+              <span className="text-lg">{formatCurrencyPrice(selectedTransactionForModal.totalPrice)}</span>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-3 border-t border-brand-border">
+              <Button variant="secondary" onClick={() => setSelectedTransactionForModal(null)}>
+                Close
+              </Button>
+              <Button variant="primary" onClick={() => { window.print(); }}>
+                Print Receipt
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* CLEAR FORM CONFIRMATION MODAL */}
       <Modal isOpen={showClearConfirm} onClose={() => setShowClearConfirm(false)} title="Discard Transaction Inputs?">
         <div className="flex flex-col gap-4 py-2">
           <p className="body-md text-brand-secondary">
-            You have unsaved changes in this sales transaction form. Are you sure you want to clear all inputs?
+            You have active items in your checkout cart. Are you sure you want to discard this transaction?
           </p>
           <div className="flex justify-end gap-3 border-t border-brand-border pt-4 mt-2">
             <Button variant="secondary" onClick={() => setShowClearConfirm(false)}>
-              Keep Editing
+              Keep Cart
             </Button>
-            <Button variant="primary" onClick={confirmClearForm}>
-              Clear Form
+            <Button variant="primary" onClick={() => { resetForm(); setShowClearConfirm(false); }}>
+              Clear Cart
             </Button>
           </div>
         </div>
@@ -602,3 +795,4 @@ export const Sales: React.FC = () => {
     </div>
   );
 };
+

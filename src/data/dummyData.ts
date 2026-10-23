@@ -1,0 +1,472 @@
+import type { Product, Transaction, DashboardMetrics, ReportSummaryPayload } from '../types/inventory';
+
+export const INITIAL_PRODUCTS: Product[] = [
+  {
+    id: 'prod-1',
+    name: 'MacBook Pro 16" M3 Max',
+    sku: 'SKU-29384',
+    category: 'Electronics',
+    supplier: 'Apple Global',
+    purchasePrice: 2850.00,
+    sellingPrice: 3499.00,
+    quantity: 42,
+    status: 'IN STOCK',
+    minStock: 10,
+    thumbnailColor: '#F3F4F6',
+    thumbnailIcon: 'laptop',
+  },
+  {
+    id: 'prod-2',
+    name: 'Sony WH-1000XM5 ANC Headphones',
+    sku: 'SKU-11029',
+    category: 'Electronics',
+    supplier: 'Sony Logistics',
+    purchasePrice: 240.00,
+    sellingPrice: 399.00,
+    quantity: 4,
+    status: 'LOW STOCK',
+    minStock: 10,
+    thumbnailColor: '#E5E7EB',
+    thumbnailIcon: 'headphones',
+  },
+  {
+    id: 'prod-3',
+    name: 'Keychron Q1 Pro Wireless Mechanical Keyboard',
+    sku: 'SKU-88273',
+    category: 'Peripherals',
+    supplier: 'Keychron Hub',
+    purchasePrice: 120.00,
+    sellingPrice: 199.00,
+    quantity: 0,
+    status: 'OUT OF STOCK',
+    minStock: 8,
+    thumbnailColor: '#F9FAFB',
+    thumbnailIcon: 'keyboard',
+  },
+  {
+    id: 'prod-4',
+    name: 'Logitech MX Master 3S Wireless Mouse',
+    sku: 'SKU-44021',
+    category: 'Peripherals',
+    supplier: 'Logi Distribution',
+    purchasePrice: 65.00,
+    sellingPrice: 129.00,
+    quantity: 156,
+    status: 'IN STOCK',
+    minStock: 20,
+    thumbnailColor: '#E5E7EB',
+    thumbnailIcon: 'mouse',
+  },
+  {
+    id: 'prod-5',
+    name: 'Dell UltraSharp 32" 4K Video Conferencing Monitor',
+    sku: 'SKU-55120',
+    category: 'Hardware',
+    supplier: 'Dell Direct',
+    purchasePrice: 890.00,
+    sellingPrice: 1249.00,
+    quantity: 18,
+    status: 'IN STOCK',
+    minStock: 5,
+    thumbnailColor: '#F3F4F6',
+    thumbnailIcon: 'monitor',
+  },
+  {
+    id: 'prod-6',
+    name: 'Anker Prime 20,000mAh Power Bank (200W)',
+    sku: 'SKU-77291',
+    category: 'Accessories',
+    supplier: 'Anker Official',
+    purchasePrice: 75.00,
+    sellingPrice: 129.99,
+    quantity: 64,
+    status: 'IN STOCK',
+    minStock: 15,
+    thumbnailColor: '#F3F4F6',
+    thumbnailIcon: 'laptop',
+  },
+  {
+    id: 'prod-7',
+    name: 'Apple Studio Display 27" 5K Retina',
+    sku: 'SKU-99201',
+    category: 'Electronics',
+    supplier: 'Apple Global',
+    purchasePrice: 1299.00,
+    sellingPrice: 1599.00,
+    quantity: 6,
+    status: 'LOW STOCK',
+    minStock: 8,
+    thumbnailColor: '#E5E7EB',
+    thumbnailIcon: 'monitor',
+  },
+  {
+    id: 'prod-8',
+    name: 'CalDigit TS4 Thunderbolt 4 Docking Station',
+    sku: 'SKU-66382',
+    category: 'Hardware',
+    supplier: 'CalDigit Corp',
+    purchasePrice: 280.00,
+    sellingPrice: 399.95,
+    quantity: 23,
+    status: 'IN STOCK',
+    minStock: 5,
+    thumbnailColor: '#F9FAFB',
+    thumbnailIcon: 'stand',
+  },
+  {
+    id: 'prod-9',
+    name: 'Desk Mat Felt & Vegan Leather Minimalist',
+    sku: 'SKU-33214',
+    category: 'Stationery',
+    supplier: 'Grovemade Co',
+    purchasePrice: 18.00,
+    sellingPrice: 48.00,
+    quantity: 85,
+    status: 'IN STOCK',
+    minStock: 25,
+    thumbnailColor: '#F3F4F6',
+    thumbnailIcon: 'mat',
+  },
+  {
+    id: 'prod-10',
+    name: 'BenQ ScreenBar Pro LED Monitor Light',
+    sku: 'SKU-12847',
+    category: 'Accessories',
+    supplier: 'BenQ Direct',
+    purchasePrice: 85.00,
+    sellingPrice: 139.00,
+    quantity: 2,
+    status: 'LOW STOCK',
+    minStock: 10,
+    thumbnailColor: '#E5E7EB',
+    thumbnailIcon: 'stand',
+  }
+];
+
+export const INITIAL_TRANSACTIONS: Transaction[] = [
+  {
+    id: 'TXN-90231',
+    productName: 'Keychron Q1 Pro Wireless Mechanical Keyboard',
+    sku: 'SKU-88273',
+    customer: 'Alexander Thorne',
+    quantity: 2,
+    totalPrice: 398.00,
+    status: 'DELIVERED',
+    date: '2026-07-15',
+    items: [
+      {
+        productId: 'prod-3',
+        productName: 'Keychron Q1 Pro Wireless Mechanical Keyboard',
+        sku: 'SKU-88273',
+        quantity: 2,
+        unitPrice: 199.00,
+      }
+    ]
+  },
+  {
+    id: 'TXN-90232',
+    productName: 'Logitech MX Master 3S Wireless Mouse',
+    sku: 'SKU-44021',
+    customer: 'Sarah Jenkins',
+    quantity: 1,
+    totalPrice: 129.00,
+    status: 'PROCESSING',
+    date: '2026-07-16',
+    items: [
+      {
+        productId: 'prod-4',
+        productName: 'Logitech MX Master 3S Wireless Mouse',
+        sku: 'SKU-44021',
+        quantity: 1,
+        unitPrice: 129.00,
+      }
+    ]
+  },
+  {
+    id: 'TXN-90233',
+    productName: 'MacBook Pro 16" M3 Max',
+    sku: 'SKU-29384',
+    customer: 'Horizon Tech Studios',
+    quantity: 3,
+    totalPrice: 10497.00,
+    status: 'DELIVERED',
+    date: '2026-07-17',
+    items: [
+      {
+        productId: 'prod-1',
+        productName: 'MacBook Pro 16" M3 Max',
+        sku: 'SKU-29384',
+        quantity: 3,
+        unitPrice: 3499.00,
+      }
+    ]
+  },
+  {
+    id: 'TXN-90234',
+    productName: 'Dell UltraSharp 32" 4K Video Conferencing Monitor',
+    sku: 'SKU-55120',
+    customer: 'Elena Rostova',
+    quantity: 2,
+    totalPrice: 2498.00,
+    status: 'DELIVERED',
+    date: '2026-07-18',
+    items: [
+      {
+        productId: 'prod-5',
+        productName: 'Dell UltraSharp 32" 4K Video Conferencing Monitor',
+        sku: 'SKU-55120',
+        quantity: 2,
+        unitPrice: 1249.00,
+      }
+    ]
+  },
+  {
+    id: 'TXN-90235',
+    productName: 'Sony WH-1000XM5 ANC Headphones',
+    sku: 'SKU-11029',
+    customer: 'David Kim',
+    quantity: 1,
+    totalPrice: 399.00,
+    status: 'PROCESSING',
+    date: '2026-07-19',
+    items: [
+      {
+        productId: 'prod-2',
+        productName: 'Sony WH-1000XM5 ANC Headphones',
+        sku: 'SKU-11029',
+        quantity: 1,
+        unitPrice: 399.00,
+      }
+    ]
+  },
+  {
+    id: 'TXN-90236',
+    productName: 'CalDigit TS4 Thunderbolt 4 Docking Station',
+    sku: 'SKU-66382',
+    customer: 'Quantum Design Lab',
+    quantity: 4,
+    totalPrice: 1599.80,
+    status: 'DELIVERED',
+    date: '2026-07-20',
+    items: [
+      {
+        productId: 'prod-8',
+        productName: 'CalDigit TS4 Thunderbolt 4 Docking Station',
+        sku: 'SKU-66382',
+        quantity: 4,
+        unitPrice: 399.95,
+      }
+    ]
+  },
+  {
+    id: 'TXN-90237',
+    productName: 'Desk Mat Felt & Vegan Leather Minimalist',
+    sku: 'SKU-33214',
+    customer: 'Marcus Vance',
+    quantity: 5,
+    totalPrice: 240.00,
+    status: 'DELIVERED',
+    date: new Date().toISOString().split('T')[0],
+    items: [
+      {
+        productId: 'prod-9',
+        productName: 'Desk Mat Felt & Vegan Leather Minimalist',
+        sku: 'SKU-33214',
+        quantity: 5,
+        unitPrice: 48.00,
+      }
+    ]
+  },
+  {
+    id: 'TXN-90238',
+    productName: 'Logitech MX Master 3S Wireless Mouse',
+    sku: 'SKU-44021',
+    customer: 'Chloe Zhao',
+    quantity: 2,
+    totalPrice: 258.00,
+    status: 'DELIVERED',
+    date: new Date().toISOString().split('T')[0],
+    items: [
+      {
+        productId: 'prod-4',
+        productName: 'Logitech MX Master 3S Wireless Mouse',
+        sku: 'SKU-44021',
+        quantity: 2,
+        unitPrice: 129.00,
+      }
+    ]
+  }
+];
+
+export const INITIAL_STOCK_MOVEMENTS = [
+  {
+    id: 'mov-1',
+    productId: 'prod-1',
+    sku: 'SKU-29384',
+    productName: 'MacBook Pro 16" M3 Max',
+    type: 'INITIAL' as const,
+    quantityDelta: 45,
+    previousQuantity: 0,
+    newQuantity: 45,
+    date: '2026-07-01',
+    note: 'Initial inventory intake'
+  },
+  {
+    id: 'mov-2',
+    productId: 'prod-1',
+    sku: 'SKU-29384',
+    productName: 'MacBook Pro 16" M3 Max',
+    type: 'SALE' as const,
+    quantityDelta: -3,
+    previousQuantity: 45,
+    newQuantity: 42,
+    date: '2026-07-17',
+    referenceId: 'TXN-90233',
+    note: 'POS Checkout Sale'
+  },
+  {
+    id: 'mov-3',
+    productId: 'prod-2',
+    sku: 'SKU-11029',
+    productName: 'Sony WH-1000XM5 ANC Headphones',
+    type: 'SALE' as const,
+    quantityDelta: -1,
+    previousQuantity: 5,
+    newQuantity: 4,
+    date: '2026-07-19',
+    referenceId: 'TXN-90235',
+    note: 'Customer purchase'
+  },
+  {
+    id: 'mov-4',
+    productId: 'prod-3',
+    sku: 'SKU-88273',
+    productName: 'Keychron Q1 Pro Wireless Mechanical Keyboard',
+    type: 'SALE' as const,
+    quantityDelta: -2,
+    previousQuantity: 2,
+    newQuantity: 0,
+    date: '2026-07-15',
+    referenceId: 'TXN-90231',
+    note: 'Depleted remaining inventory stock'
+  },
+  {
+    id: 'mov-5',
+    productId: 'prod-4',
+    sku: 'SKU-44021',
+    productName: 'Logitech MX Master 3S Wireless Mouse',
+    type: 'RESTOCK' as const,
+    quantityDelta: 100,
+    previousQuantity: 58,
+    newQuantity: 158,
+    date: '2026-07-10',
+    note: 'Bulk shipment received from Logi Distribution'
+  }
+];
+
+
+export const DUMMY_DASHBOARD_METRICS: DashboardMetrics = {
+  salesVelocity: [
+    { day: 'MON', value: 1250 },
+    { day: 'TUE', value: 2400 },
+    { day: 'WED', value: 4850, highlighted: true },
+    { day: 'THU', value: 3100 },
+    { day: 'FRI', value: 3950 },
+    { day: 'SAT', value: 1800 },
+    { day: 'SUN', value: 1420 },
+  ],
+  stockHealth: {
+    optimal: 65,
+    overstocked: 15,
+    critical: 20,
+  },
+};
+
+export const DUMMY_REPORT_SUMMARY: ReportSummaryPayload = {
+  summary: {
+    totalStockValue: 248650,
+    totalStockValueGrowth: '+8.4%',
+    lowStockAlerts: 3,
+    lowStockLevel: 'Warning',
+    inventoryTurnover: 6.8,
+    inventoryTurnoverStatus: 'Optimal',
+    deadStockRate: 1.8,
+    deadStockRateGrowth: '-0.4%',
+    deadStockImpact: '₹14.2k',
+  },
+  performance: [
+    {
+      productName: 'MacBook Pro 16" M3 Max',
+      sku: 'SKU-29384',
+      unitsSold: 28,
+      revenue: 97972,
+      growth: 18.5,
+      status: 'HIGH VELOCITY',
+      thumbnailColor: '#F3F4F6',
+      thumbnailIcon: 'laptop',
+    },
+    {
+      productName: 'Logitech MX Master 3S',
+      sku: 'SKU-44021',
+      unitsSold: 64,
+      revenue: 8256,
+      growth: 14.2,
+      status: 'HIGH VELOCITY',
+      thumbnailColor: '#E5E7EB',
+      thumbnailIcon: 'mouse',
+    },
+    {
+      productName: 'Dell UltraSharp 32"',
+      sku: 'SKU-55120',
+      unitsSold: 16,
+      revenue: 19984,
+      growth: 6.8,
+      status: 'STABLE',
+      thumbnailColor: '#F3F4F6',
+      thumbnailIcon: 'monitor',
+    },
+    {
+      productName: 'Sony WH-1000XM5',
+      sku: 'SKU-11029',
+      unitsSold: 22,
+      revenue: 8778,
+      growth: 9.1,
+      status: 'STABLE',
+      thumbnailColor: '#E5E7EB',
+      thumbnailIcon: 'headphones',
+    },
+    {
+      productName: 'Keychron Q1 Pro',
+      sku: 'SKU-88273',
+      unitsSold: 14,
+      revenue: 2786,
+      growth: -2.3,
+      status: 'SLOWING',
+      thumbnailColor: '#F9FAFB',
+      thumbnailIcon: 'keyboard',
+    },
+  ],
+  urgentActions: [
+    {
+      id: 'action-low-stock',
+      type: 'low_stock',
+      title: 'Low Stock Threshold Warning',
+      description: '3 product lines (Sony XM5, Apple Studio Display, BenQ ScreenBar) have fallen below safety reorder stock.',
+      actionText: 'Restock Products',
+    },
+    {
+      id: 'action-out-of-stock',
+      type: 'audit_required',
+      title: 'Out of Stock: Keychron Q1 Pro',
+      description: 'Zero units remaining in inventory. Pending customer backorders accumulating.',
+      actionText: 'Order Re-supply',
+    },
+    {
+      id: 'action-excess',
+      type: 'excess_inventory',
+      title: 'Excess Inventory Alert',
+      description: 'Logitech MX Master 3S inventory (156 units) exceeds 4x safety threshold. Consider promo discount.',
+      actionText: 'Create Promotion',
+    },
+  ],
+};

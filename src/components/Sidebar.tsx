@@ -5,9 +5,11 @@ import {
   Package, 
   CreditCard, 
   BarChart3, 
+  LineChart,
   Plus,
   X
 } from 'lucide-react';
+
 import { Button } from './Button';
 
 interface SidebarProps {
@@ -24,8 +26,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onNewEntryClick, isOpen = fals
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
     { name: 'Products', path: '/products', icon: Package },
     { name: 'Sales', path: '/sales', icon: CreditCard },
+    { name: 'Product Analysis', path: '/analytics', icon: LineChart },
     { name: 'Reports', path: '/reports', icon: BarChart3 },
   ];
+
 
   return (
     <>

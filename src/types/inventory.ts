@@ -13,6 +13,23 @@ export interface Product {
   thumbnailIcon: string;  // icon type for rendering
 }
 
+export interface SaleCartItem {
+  productId: string;
+  name: string;
+  sku: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+}
+
+export interface TransactionItem {
+  productId: string;
+  productName: string;
+  sku: string;
+  quantity: number;
+  unitPrice: number;
+}
+
 export interface Transaction {
   id: string;
   productName: string;
@@ -22,6 +39,23 @@ export interface Transaction {
   totalPrice: number;
   status: 'DELIVERED' | 'PROCESSING' | 'ON HOLD';
   date: string;
+  items?: TransactionItem[];
+  discount?: number;
+  note?: string;
+}
+
+export interface StockMovement {
+  id: string;
+  productId: string;
+  sku: string;
+  productName: string;
+  type: 'SALE' | 'RESTOCK' | 'ADJUSTMENT' | 'INITIAL';
+  quantityDelta: number;
+  previousQuantity: number;
+  newQuantity: number;
+  date: string;
+  referenceId?: string;
+  note?: string;
 }
 
 export interface Sale {
@@ -68,6 +102,36 @@ export interface ProductPerformance {
   status: 'HIGH VELOCITY' | 'STABLE' | 'SLOWING';
   thumbnailColor: string;
   thumbnailIcon?: string;
+}
+
+export interface ProductAnalyticsMetric {
+  product: Product;
+  productName: string;
+  sku: string;
+  category: string;
+  supplier: string;
+  quantity: number;
+  unitsSold: number;
+  revenue: number;
+  estimatedCost: number;
+  grossProfit: number;
+  grossMargin: number;
+  lastSaleDate: string | null;
+  avgDailySales: number;
+  daysUntilStockout: number; // 999 if no sales or infinite
+  suggestedReorderQty: number;
+  performanceStatus: 'HIGH VELOCITY' | 'STABLE' | 'SLOWING' | 'DEAD STOCK';
+}
+
+
+export interface ActionableInsight {
+  id: string;
+  type: 'restock' | 'out_of_stock' | 'best_seller' | 'slow_moving' | 'excess' | 'low_margin' | 'approaching_stockout';
+  title: string;
+  description: string;
+  actionText: string;
+  productId?: string;
+  severity: 'critical' | 'warning' | 'info' | 'success';
 }
 
 export interface UrgentAction {
@@ -135,4 +199,5 @@ export interface IReportService {
 export interface IInventoryService {
   getInventoryOverview(): Promise<ServiceResponse<InventoryOverview>>;
 }
+
 

@@ -61,12 +61,24 @@ export const Reports: React.FC = () => {
   // Compute dynamic performance dataset
   const performanceData = useMemo(() => {
     return products.map(p => {
-      // Aggregate units sold from transaction history
-      const unitsSold = transactions
-        .filter(t => t.sku === p.sku && t.status === 'DELIVERED')
-        .reduce((sum, t) => sum + t.quantity, 0);
+      // Aggregate units sold from transaction history (accounting for multi-item carts)
+      let unitsSold = 0;
+      let revenue = 0;
 
-      const revenue = unitsSold * p.sellingPrice;
+      transactions.forEach(t => {
+        if (t.status !== 'DELIVERED') return;
+        if (t.items && t.items.length > 0) {
+          t.items.forEach(item => {
+            if (item.productId === p.id || item.sku === p.sku) {
+              unitsSold += item.quantity;
+              revenue += item.quantity * item.unitPrice;
+            }
+          });
+        } else if (t.sku === p.sku) {
+          unitsSold += t.quantity;
+          revenue += t.totalPrice;
+        }
+      });
       
       // Determine velocity status based on sales quantity
       let status: 'HIGH VELOCITY' | 'STABLE' | 'SLOWING' = 'SLOWING';
@@ -132,12 +144,35 @@ export const Reports: React.FC = () => {
             ariaLabel="Timeline select"
           />
 
-          <Button variant="secondary" className="flex items-center gap-2">
+          <Button 
+            variant="secondary" 
+            onClick={() => {
+              const headers = ['Product Name', 'SKU', 'Units Sold', 'Revenue', 'Growth (%)', 'Status'];
+              const rows = sortedPerformance.map(p => [
+                `"${p.productName}"`,
+                p.sku,
+                p.unitsSold,
+                p.revenue,
+                `${p.growth}%`,
+                p.status
+              ]);
+              const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+              const encodedUri = encodeURI(csvContent);
+              const link = document.createElement('a');
+              link.setAttribute('href', encodedUri);
+              link.setAttribute('download', `StockWise_Report_${new Date().toISOString().split('T')[0]}.csv`);
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }}
+            className="flex items-center gap-2"
+          >
             <FileDown className="h-4 w-4" />
-            <span>Export PDF</span>
+            <span>Export Report</span>
           </Button>
         </div>
       </div>
+
 
       {/* Inventory Summary Cards Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

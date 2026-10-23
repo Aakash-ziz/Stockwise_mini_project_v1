@@ -5,10 +5,11 @@ import { Dashboard } from './pages/Dashboard';
 import { Products } from './pages/Products';
 import { Sales } from './pages/Sales';
 import { Reports } from './pages/Reports';
+import { ProductAnalysis } from './pages/ProductAnalysis';
 import { Modal } from './components/Modal';
 import { Button } from './components/Button';
 import { Toast } from './components/Toast';
-import { Package, CreditCard } from 'lucide-react';
+import { Package, CreditCard, LineChart } from 'lucide-react';
 import './App.css';
 
 // Separate routing component to use navigate safely
@@ -29,9 +30,11 @@ const AppContent = () => {
           <Route path="/" element={<Dashboard />} />
           <Route path="/products" element={<Products />} />
           <Route path="/sales" element={<Sales />} />
+          <Route path="/analytics" element={<ProductAnalysis />} />
           <Route path="/reports" element={<Reports />} />
         </Routes>
       </PageLayout>
+
 
       {/* Global New Entry Shortcut Modal */}
       <Modal 
@@ -64,7 +67,18 @@ const AppContent = () => {
               <span className="text-sm font-semibold text-brand-primary mt-3">Process Sale</span>
               <span className="caption text-brand-tertiary mt-1">Complete customer purchase</span>
             </button>
+
+            {/* Product Analysis option */}
+            <button
+              onClick={() => handleAction('/analytics')}
+              className="flex flex-col items-center justify-center p-6 border border-brand-border rounded-md hover:bg-neutral-50 dark:hover:bg-brand-border/30 transition-all select-none group text-left w-full h-36 cursor-pointer sm:col-span-2"
+            >
+              <LineChart className="h-8 w-8 text-brand-secondary group-hover:text-brand-primary transition-colors stroke-[1.5]" />
+              <span className="text-sm font-semibold text-brand-primary mt-3">Product Analysis & Margins</span>
+              <span className="caption text-brand-tertiary mt-1">View gross margins, runaways, and reorder insights</span>
+            </button>
           </div>
+
 
           <div className="flex justify-end border-t border-brand-border pt-4 mt-4">
             <Button variant="secondary" onClick={() => setIsNewEntryModalOpen(false)}>

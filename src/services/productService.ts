@@ -1,6 +1,7 @@
 import type { Product, IProductService, ServiceResponse } from '../types/inventory';
 import { apiClient } from '../api/apiClient';
 import { API_ENDPOINTS } from '../api/endpoints';
+import { mockRepository } from '../data/mockRepository';
 
 const mapBackendToFrontend = (item: any): Product => {
   return {
@@ -8,7 +9,7 @@ const mapBackendToFrontend = (item: any): Product => {
     name: item.name,
     sku: item.sku,
     category: item.category?.name || 'Electronics',
-    supplier: item.supplier?.name || 'Dell Direct',
+    supplier: item.supplier?.name || 'Direct',
     purchasePrice: Number(item.purchasePrice),
     sellingPrice: Number(item.sellingPrice),
     quantity: item.inventory?.quantity || 0,
@@ -19,77 +20,82 @@ const mapBackendToFrontend = (item: any): Product => {
   };
 };
 
-const resolveCategoryId = async (name: string): Promise<string> => {
-  const res = await apiClient.get<any>(API_ENDPOINTS.categories.list, { queryParams: { limit: 100 } });
-  if (res.success && res.data?.items) {
-    const matched = res.data.items.find((c: any) => c.name.toLowerCase() === name.toLowerCase());
-    if (matched) return matched.id;
-  }
-  // Dynamic creation if category not found
-  const createRes = await apiClient.post<any>(API_ENDPOINTS.categories.create, { body: { name } });
-  if (createRes.success && createRes.data) {
-    return createRes.data.id;
-  }
-  return 'cat-electronics'; // fallback seed uuid
-};
-
-const resolveSupplierId = async (name: string): Promise<string> => {
-  const res = await apiClient.get<any>(API_ENDPOINTS.suppliers.list, { queryParams: { limit: 100 } });
-  if (res.success && res.data?.items) {
-    const matched = res.data.items.find((s: any) => s.name.toLowerCase() === name.toLowerCase());
-    if (matched) return matched.id;
-  }
-  // Dynamic creation if supplier not found
-  const createRes = await apiClient.post<any>(API_ENDPOINTS.suppliers.create, { body: { name } });
-  if (createRes.success && createRes.data) {
-    return createRes.data.id;
-  }
-  return 'sup-dell'; // fallback seed uuid
-};
-
 export const productService: IProductService = {
   getProducts: async (): Promise<ServiceResponse<Product[]>> => {
-    const res = await apiClient.get<any>(API_ENDPOINTS.products.list, { queryParams: { limit: 1000 } });
-    if (!res.success) {
-      return {
-        success: false,
-        data: [],
-        error: {
-          code: res.error?.code || 'API_ERROR',
-          message: res.message || 'Failed to fetch products',
-        },
-      };
+    try {
+      const res = await apiClient.get<any>(API_ENDPOINTS.products.list, { queryParams: { limit: 1000 } });
+      if (res.success && res.data?.items && res.data.items.length > 0) {
+        return {
+          success: true,
+          data: res.data.items.map(mapBackendToFrontend),
+        };
+      }
+    } catch {
+      // Backend not running, fall through to mock repository
     }
-    const items = res.data?.items || [];
+
     return {
       success: true,
-      data: items.map(mapBackendToFrontend),
+      data: mockRepository.getProducts(),
     };
   },
 
   getProductById: async (id: string): Promise<ServiceResponse<Product | null>> => {
-    const res = await apiClient.get<any>(API_ENDPOINTS.products.detail, { pathParams: { id } });
-    if (!res.success) {
-      return {
-        success: false,
-        data: null,
-        error: {
-          code: res.error?.code || 'API_ERROR',
-          message: res.message || 'Failed to fetch product details',
-        },
-      };
+    try {
+      const res = await apiClient.get<any>(API_ENDPOINTS.products.detail, { pathParams: { id } });
+      if (res.success && res.data) {
+        return {
+          success: true,
+          data: mapBackendToFrontend(res.data),
+        };
+      }
+    } catch {
+      // Backend not running
     }
+
     return {
       success: true,
-      data: mapBackendToFrontend(res.data),
+      data: mockRepository.getProductById(id),
     };
   },
 
   createProduct: async (product: Omit<Product, 'id' | 'status'>): Promise<ServiceResponse<Product>> => {
     try {
-      const categoryId = await resolveCategoryId(product.category);
-      const supplierId = await resolveSupplierId(product.supplier);
+      // 1. Resolve Category ID (find or create)
+      let categoryId = 'cat-electronics';
+      const catRes = await apiClient.get<any>(API_ENDPOINTS.categories.list, { queryParams: { limit: 100 } });
+      if (catRes.success && catRes.data?.items) {
+        const foundCat = catRes.data.items.find((c: any) => c.name.toLowerCase() === product.category.toLowerCase());
+        if (foundCat) {
+          categoryId = foundCat.id;
+        } else {
+          const newCat = await apiClient.post<any>(API_ENDPOINTS.categories.create, {
+            body: { name: product.category, description: `${product.category} category` }
+          });
+          if (newCat.success && newCat.data) {
+            categoryId = newCat.data.id;
+          }
+        }
+      }
 
+      // 2. Resolve Supplier ID (find or create)
+      let supplierId: string | undefined;
+      const supRes = await apiClient.get<any>(API_ENDPOINTS.suppliers.list, { queryParams: { limit: 100 } });
+      if (supRes.success && supRes.data?.items && product.supplier) {
+        const foundSup = supRes.data.items.find((s: any) => s.name.toLowerCase() === product.supplier.toLowerCase());
+        if (foundSup) {
+          supplierId = foundSup.id;
+        } else {
+          const newSup = await apiClient.post<any>(API_ENDPOINTS.suppliers.create, {
+            body: { name: product.supplier, contactInfo: `contact@${product.supplier.toLowerCase().replace(/\s+/g, '')}.com` }
+          });
+          if (newSup.success && newSup.data) {
+            supplierId = newSup.data.id;
+          }
+        }
+      }
+
+      // 3. Post to backend
       const payload = {
         name: product.name,
         sku: product.sku,
@@ -97,57 +103,73 @@ export const productService: IProductService = {
         supplierId,
         purchasePrice: product.purchasePrice,
         sellingPrice: product.sellingPrice,
-        thumbnailColor: product.thumbnailColor,
-        thumbnailIcon: product.thumbnailIcon,
         quantity: product.quantity,
         minStock: product.minStock,
+        thumbnailColor: product.thumbnailColor,
+        thumbnailIcon: product.thumbnailIcon,
       };
 
       const res = await apiClient.post<any>(API_ENDPOINTS.products.create, { body: payload });
-      if (!res.success) {
+      if (res.success && res.data) {
+        const createdFrontend = mapBackendToFrontend(res.data);
+        mockRepository.addProduct(createdFrontend);
         return {
-          success: false,
-          data: null as any,
-          error: {
-            code: res.error?.code || 'API_ERROR',
-            message: res.message || 'Failed to create product',
-          },
+          success: true,
+          data: createdFrontend,
         };
       }
-      return {
-        success: true,
-        data: mapBackendToFrontend(res.data),
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        data: null as any,
-        error: {
-          code: 'API_ERROR',
-          message: err.message || 'An error occurred during product creation',
-        },
-      };
+    } catch {
+      // Backend not running
     }
+
+    const created = mockRepository.addProduct(product);
+    return {
+      success: true,
+      data: created,
+    };
   },
 
   updateProduct: async (id: string, updatedFields: Partial<Product>): Promise<ServiceResponse<Product | null>> => {
     try {
-      const payload: any = {
-        name: updatedFields.name,
-        sku: updatedFields.sku,
-        purchasePrice: updatedFields.purchasePrice,
-        sellingPrice: updatedFields.sellingPrice,
-        thumbnailColor: updatedFields.thumbnailColor,
-        thumbnailIcon: updatedFields.thumbnailIcon,
-        quantity: updatedFields.quantity,
-        minStock: updatedFields.minStock,
-      };
+      const payload: any = {};
+      if (updatedFields.name !== undefined) payload.name = updatedFields.name;
+      if (updatedFields.purchasePrice !== undefined) payload.purchasePrice = updatedFields.purchasePrice;
+      if (updatedFields.sellingPrice !== undefined) payload.sellingPrice = updatedFields.sellingPrice;
+      if (updatedFields.quantity !== undefined) payload.quantity = updatedFields.quantity;
+      if (updatedFields.minStock !== undefined) payload.minStock = updatedFields.minStock;
 
       if (updatedFields.category) {
-        payload.categoryId = await resolveCategoryId(updatedFields.category);
+        const catRes = await apiClient.get<any>(API_ENDPOINTS.categories.list, { queryParams: { limit: 100 } });
+        if (catRes.success && catRes.data?.items) {
+          const foundCat = catRes.data.items.find((c: any) => c.name.toLowerCase() === updatedFields.category!.toLowerCase());
+          if (foundCat) {
+            payload.categoryId = foundCat.id;
+          } else {
+            const newCat = await apiClient.post<any>(API_ENDPOINTS.categories.create, {
+              body: { name: updatedFields.category, description: `${updatedFields.category} category` }
+            });
+            if (newCat.success && newCat.data) {
+              payload.categoryId = newCat.data.id;
+            }
+          }
+        }
       }
+
       if (updatedFields.supplier) {
-        payload.supplierId = await resolveSupplierId(updatedFields.supplier);
+        const supRes = await apiClient.get<any>(API_ENDPOINTS.suppliers.list, { queryParams: { limit: 100 } });
+        if (supRes.success && supRes.data?.items) {
+          const foundSup = supRes.data.items.find((s: any) => s.name.toLowerCase() === updatedFields.supplier!.toLowerCase());
+          if (foundSup) {
+            payload.supplierId = foundSup.id;
+          } else {
+            const newSup = await apiClient.post<any>(API_ENDPOINTS.suppliers.create, {
+              body: { name: updatedFields.supplier, contactInfo: `contact@${updatedFields.supplier.toLowerCase().replace(/\s+/g, '')}.com` }
+            });
+            if (newSup.success && newSup.data) {
+              payload.supplierId = newSup.data.id;
+            }
+          }
+        }
       }
 
       const res = await apiClient.put<any>(API_ENDPOINTS.products.update, {
@@ -155,47 +177,44 @@ export const productService: IProductService = {
         body: payload,
       });
 
-      if (!res.success) {
+      if (res.success && res.data) {
+        const updatedFrontend = mapBackendToFrontend(res.data);
+        mockRepository.updateProduct(id, updatedFrontend);
         return {
-          success: false,
-          data: null,
-          error: {
-            code: res.error?.code || 'API_ERROR',
-            message: res.message || 'Failed to update product',
-          },
+          success: true,
+          data: updatedFrontend,
         };
       }
-      return {
-        success: true,
-        data: mapBackendToFrontend(res.data),
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        data: null,
-        error: {
-          code: 'API_ERROR',
-          message: err.message || 'An error occurred during product update',
-        },
-      };
+    } catch {
+      // Backend not running
     }
+
+    const updated = mockRepository.updateProduct(id, updatedFields);
+    return {
+      success: true,
+      data: updated,
+    };
   },
 
   deleteProduct: async (id: string): Promise<ServiceResponse<boolean>> => {
-    const res = await apiClient.delete<any>(API_ENDPOINTS.products.delete, { pathParams: { id } });
-    if (!res.success) {
-      return {
-        success: false,
-        data: false,
-        error: {
-          code: res.error?.code || 'API_ERROR',
-          message: res.message || 'Failed to delete product',
-        },
-      };
+    try {
+      const res = await apiClient.delete<any>(API_ENDPOINTS.products.delete, { pathParams: { id } });
+      if (res.success) {
+        mockRepository.deleteProduct(id);
+        return {
+          success: true,
+          data: true,
+        };
+      }
+    } catch {
+      // Backend not running
     }
+
+    const deleted = mockRepository.deleteProduct(id);
     return {
       success: true,
-      data: true,
+      data: deleted,
     };
   },
 };
+

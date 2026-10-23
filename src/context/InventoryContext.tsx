@@ -1,17 +1,30 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { Product, Transaction, ToastMessage } from '../types/inventory';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import type { 
+  Product, 
+  Transaction, 
+  ToastMessage, 
+  StockMovement, 
+  SaleCartItem,
+  ProductAnalyticsMetric,
+  ActionableInsight 
+} from '../types/inventory';
 import { calculateStatus } from '../utils/status';
 import { productService } from '../services/productService';
 import { salesService } from '../services/salesService';
+import { mockRepository } from '../data/mockRepository';
 
 interface InventoryContextType {
   products: Product[];
   transactions: Transaction[];
+  movements: StockMovement[];
   toasts: ToastMessage[];
   addProduct: (product: Omit<Product, 'id' | 'status' | 'thumbnailColor' | 'thumbnailIcon'>) => { success: boolean; error?: string };
   editProduct: (id: string, updatedFields: Omit<Product, 'id' | 'status' | 'sku' | 'thumbnailColor' | 'thumbnailIcon'>) => { success: boolean; error?: string };
   deleteProduct: (id: string) => void;
-  addTransaction: (transaction: { productName: string; sku: string; customer: string; quantity: number; totalPrice: number }) => { success: boolean; error?: string };
+  addTransaction: (transaction: { productName: string; sku: string; customer: string; quantity: number; totalPrice: number; discount?: number; note?: string }) => { success: boolean; error?: string };
+  processCheckout: (payload: { customer: string; items: SaleCartItem[]; discount?: number; note?: string }) => Promise<{ success: boolean; error?: string; transaction?: Transaction }>;
+  resetDemoData: () => void;
+  refreshData: () => void;
   triggerToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   dismissToast: (id: string) => void;
   
@@ -19,9 +32,15 @@ interface InventoryContextType {
   totalProductsCount: number; // Unique SKUs
   totalStockCount: number; // Sum of available quantities
   totalStockValue: number; // Sum of qty * sellingPrice
+  totalEstimatedCost: number; // Sum of qty * purchasePrice
   lowStockCount: number; // Count of products where quantity <= minStock
+  outOfStockCount: number; // Count of products where quantity === 0
   soldTodayCount: number; // Total item quantities sold in transactions today
   soldTodayRevenue: number; // Today's transactions revenue
+  
+  // Advanced Analytics Helpers
+  getProductAnalytics: (days?: number) => ProductAnalyticsMetric[];
+  getActionableInsights: () => ActionableInsight[];
   
   loading: boolean;
   error: string | null;
@@ -32,40 +51,47 @@ const InventoryContext = createContext<InventoryContextType | undefined>(undefin
 export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [movements, setMovements] = useState<StockMovement[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize and load inventory details asynchronously from services
-  useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      productService.getProducts(),
-      salesService.getSales()
-    ])
-      .then(([prodsRes, txsRes]) => {
-        if (prodsRes.success && txsRes.success) {
-          setProducts(prodsRes.data.map(p => ({
-            ...p,
-            status: calculateStatus(p.quantity, p.minStock)
-          })));
-          setTransactions(txsRes.data);
-        } else {
-          setError(prodsRes.error?.message || txsRes.error?.message || 'Failed to initialize inventory.');
-        }
-        setLoading(false);
-      })
-      .catch(err => {
-        setError(err.message || 'Failed to load inventory data.');
-        setLoading(false);
-      });
+  const loadData = useCallback(async () => {
+    try {
+      const [prodsRes, txsRes] = await Promise.all([
+        productService.getProducts(),
+        salesService.getSales()
+      ]);
+
+      if (prodsRes.success && txsRes.success) {
+        const mappedProducts = prodsRes.data.map(p => ({
+          ...p,
+          status: calculateStatus(p.quantity, p.minStock)
+        }));
+        setProducts(mappedProducts);
+        setTransactions(txsRes.data);
+        mockRepository.syncProducts(mappedProducts);
+        mockRepository.syncTransactions(txsRes.data);
+        setMovements(mockRepository.getMovements());
+      } else {
+        setError(prodsRes.error?.message || txsRes.error?.message || 'Failed to initialize inventory.');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load inventory data.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  // Initialize data on mount
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
   const triggerToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const id = `toast-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     setToasts((prev) => [...prev, { id, message, type }]);
     
-    // Automatically remove after 4 seconds
     setTimeout(() => {
       dismissToast(id);
     }, 4000);
@@ -75,16 +101,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  const resetDemoData = () => {
+    mockRepository.resetDemoData();
+    loadData();
+    triggerToast('Demo dataset has been reset to default values.', 'info');
+  };
+
   const addProduct = (
     newP: Omit<Product, 'id' | 'status' | 'thumbnailColor' | 'thumbnailIcon'>
   ): { success: boolean; error?: string } => {
-    // Check duplicate SKU
     const isDuplicate = products.some(p => p.sku.trim().toLowerCase() === newP.sku.trim().toLowerCase());
     if (isDuplicate) {
       return { success: false, error: 'SKU ID must be unique. This SKU is already registered.' };
     }
 
-    // Dynamic icon assignment based on category
     let thumbnailIcon = 'keyboard';
     const catLower = newP.category.toLowerCase();
     if (catLower.includes('electron')) thumbnailIcon = 'laptop';
@@ -167,9 +197,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const addTransaction = (
-    t: { productName: string; sku: string; customer: string; quantity: number; totalPrice: number }
+    t: { productName: string; sku: string; customer: string; quantity: number; totalPrice: number; discount?: number; note?: string }
   ): { success: boolean; error?: string } => {
-    // Find the product
     const targetProduct = products.find(p => p.sku === t.sku);
     if (!targetProduct) {
       return { success: false, error: 'Product SKU not found in inventory.' };
@@ -179,74 +208,93 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return { success: false, error: `Insufficient stock. Only ${targetProduct.quantity} units available.` };
     }
 
-    const salePayload = {
-      productName: t.productName,
-      sku: t.sku,
-      customer: t.customer || 'Guest Customer',
+    const cartItem: SaleCartItem = {
+      productId: targetProduct.id,
+      name: targetProduct.name,
+      sku: targetProduct.sku,
       quantity: t.quantity,
-      totalPrice: t.totalPrice
+      unitPrice: targetProduct.sellingPrice,
+      total: t.totalPrice,
     };
 
-    // Deduct stock quantity and process sale record through services
-    salesService.createSale(salePayload).then(txnRes => {
-      if (txnRes.success) {
-        setTransactions(prev => [txnRes.data, ...prev]);
-
-        const newQty = Math.max(0, targetProduct.quantity - t.quantity);
-        productService.updateProduct(targetProduct.id, { quantity: newQty }).then(prodRes => {
-          if (prodRes.success && prodRes.data) {
-            setProducts(prev => prev.map(p => {
-              if (p.id === targetProduct.id) {
-                return {
-                  ...prodRes.data!,
-                  status: calculateStatus(prodRes.data!.quantity, prodRes.data!.minStock)
-                };
-              }
-              return p;
-            }));
-          }
-        });
-
-        triggerToast(`Sale of ${t.quantity}x "${t.productName}" processed successfully.`);
-      } else {
-        triggerToast(`Failed to complete transaction: ${txnRes.error?.message}`, 'error');
-      }
-    }).catch(err => {
-      triggerToast(`Failed to complete transaction: ${err.message || err}`, 'error');
+    processCheckout({
+      customer: t.customer,
+      items: [cartItem],
+      discount: t.discount,
+      note: t.note,
     });
 
     return { success: true };
   };
 
+  const processCheckout = async (payload: {
+    customer: string;
+    items: SaleCartItem[];
+    discount?: number;
+    note?: string;
+  }): Promise<{ success: boolean; error?: string; transaction?: Transaction }> => {
+    try {
+      const res = await salesService.processCheckout(payload);
+      if (res.success && res.data) {
+        triggerToast(`Checkout completed: Invoice ${res.data.id} generated for ${payload.customer || 'Guest'}.`);
+        loadData();
+        return { success: true, transaction: res.data };
+      } else {
+        const errMsg = res.error?.message || 'Transaction checkout failed.';
+        triggerToast(errMsg, 'error');
+        return { success: false, error: errMsg };
+      }
+    } catch (err: any) {
+      const errMsg = err.message || 'Checkout error';
+      triggerToast(errMsg, 'error');
+      return { success: false, error: errMsg };
+    }
+  };
+
   // Computations
-  const totalProductsCount = products.length; // Unique SKUs
+  const totalProductsCount = products.length;
   const totalStockCount = products.reduce((sum, p) => sum + p.quantity, 0);
   const totalStockValue = products.reduce((sum, p) => sum + (p.quantity * p.sellingPrice), 0);
-  const lowStockCount = products.filter(p => p.quantity <= p.minStock).length;
+  const totalEstimatedCost = products.reduce((sum, p) => sum + (p.quantity * p.purchasePrice), 0);
+  const lowStockCount = products.filter(p => p.quantity <= p.minStock && p.quantity > 0).length;
+  const outOfStockCount = products.filter(p => p.quantity === 0).length;
   
   const todayStr = new Date().toISOString().split('T')[0];
   const todayTxns = transactions.filter(t => t.date === todayStr);
   const soldTodayCount = todayTxns.reduce((sum, t) => sum + t.quantity, 0);
   const soldTodayRevenue = todayTxns.reduce((sum, t) => sum + t.totalPrice, 0);
 
+  const getProductAnalytics = (days?: number) => mockRepository.getProductAnalytics(days);
+  const getActionableInsights = () => mockRepository.getActionableInsights();
+
   return (
     <InventoryContext.Provider value={{
       products,
       transactions,
+      movements,
       toasts,
       addProduct,
       editProduct,
       deleteProduct,
       addTransaction,
+      processCheckout,
+      resetDemoData,
+      refreshData: loadData,
       triggerToast,
       dismissToast,
       
       totalProductsCount,
       totalStockCount,
       totalStockValue,
+      totalEstimatedCost,
       lowStockCount,
+      outOfStockCount,
       soldTodayCount,
       soldTodayRevenue,
+      
+      getProductAnalytics,
+      getActionableInsights,
+      
       loading,
       error
     }}>
@@ -262,3 +310,4 @@ export const useInventory = () => {
   }
   return context;
 };
+
